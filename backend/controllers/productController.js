@@ -1,5 +1,14 @@
 const Product = require('../models/Product'); 
 const mongoose = require('mongoose');
+const ethers = require('ethers');
+const utils = ethers;
+
+
+
+
+console.log('Ethers utils:', utils);  // Check if utils is defined
+
+const { createProduct: createProductBlockchain, updateProductState: updateProductStateBlockchain, transferOwnership: transferOwnershipBlockchain } = require('../blockchain');
 
 
 
@@ -17,6 +26,8 @@ const createProduct = async (req, res) => {
        
         const newProduct = new Product({ name, description, owner });
         await newProduct.save();
+        await createProductBlockchain(newProduct._id.toString(), name);
+
         res.status(201).json(newProduct);
     } catch (error) {
         console.error('Error in createProduct:', error);
@@ -25,16 +36,57 @@ const createProduct = async (req, res) => {
 };
 
 
+const stateMapping = {
+    'Created': 0,
+    'Manufactured': 1,
+    'ForSale': 2,
+    'Sold': 3,
+    'Shipped': 4,
+    'Received': 5,
+    'Verified': 6
+};
+
 const updateProductState = async (req, res) => {
     try {
-        const { productId } = req.params;
-        const { state } = req.body;
+        const { productId } = req.params;  
+        const { newState } = req.body;     
+
+        console.log("Received Product ID:", productId);  
+        console.log("Received New State:", newState);    
+
+        
         const product = await Product.findById(productId);
-        product.state = state;
+        if (!product) {
+            return res.status(404).json({ message: 'Product not found' });
+        }
+
+        
+        const newStateEnumValue = stateMapping[newState];
+        if (newStateEnumValue === undefined) {
+            return res.status(400).json({ message: 'Invalid state value' });
+        }
+
+        
+        product.state = newState;
         await product.save();
-        res.json(product);
+
+        
+        if (!productId) {
+            throw new Error("Invalid productId. It cannot be null or undefined.");
+        }
+
+        // Hash the MongoDB ObjectId (productId) using ethers.utils.id()
+        const hashedProductId = ethers.keccak256(ethers.toUtf8Bytes(productId.toString()));  // Convert to string
+
+        console.log("Hashed Product ID for Blockchain:", hashedProductId);
+
+        // Call blockchain to update the product state using the hashed product ID
+        await updateProductStateBlockchain(hashedProductId, newStateEnumValue);
+
+        res.json({ message: 'Product state updated successfully', product });
     } catch (error) {
-        res.status(500).json({ message: 'Error updating state', error });
+        console.error('Error updating product state:', error);
+        res.status(500).json({ message: 'Error updating state', error: error.message });
     }
 };
 
@@ -51,6 +103,10 @@ const transferProductOwnership = async (req, res) => {
         res.status(500).json({ message: 'Error transferring ownership', error });
     }
 };
+
+
+
+
 
 
 const getProduct = async (req, res) => {
